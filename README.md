@@ -70,7 +70,7 @@ To run the PDF2Audio app:
 
 2. Run the Python script that launches the Gradio interface:
    ```
-   python appv6.py
+   python app.py
    ```
 
 3. Open your web browser and go to the URL provided in the terminal (typically `http://127.0.0.1:7860`).
@@ -124,3 +124,8 @@ This project was inspired by and based on the code available at [https://github.
 
 # podcaster
 This is an extension of PDF2Audio by LAMM-MIT to provide more flexibility while creating audio
+
+## File Renaming
+
+- The original `app.py` has been renamed to `original-app.py`.
+- The updated version `appv6.py` has been renamed to `app.py`.

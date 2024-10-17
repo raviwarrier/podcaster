@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
-import appv6
+import app
+import os
 
 app = Flask(__name__)
 
@@ -28,7 +29,7 @@ def generate_audio():
     user_feedback = data.get('user_feedback', None)
 
     try:
-        audio_file, transcript, original_text, error = appv6.validate_and_generate_audio(
+        audio_file, transcript, original_text, error = app.validate_and_generate_audio(
             input_type, pdf_files, text_input, markdown_input, url_input,
             openai_api_key, text_model, audio_model, 
             speaker_1_voice, speaker_2_voice, api_base,
@@ -44,4 +45,5 @@ def generate_audio():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)

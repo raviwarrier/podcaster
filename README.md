@@ -1,16 +1,20 @@
 # PDF to Audio Converter
 
-This code can be used to convert PDFs into audio podcasts, lectures, summaries, and more. It uses OpenAI's GPT models for text generation and text-to-speech conversion. You can also edit a draft transcript (multiple times) and provide specific comments, or overall directives on how it could be adapted or improved. 
+Modified from: https://github.com/lamm-mit/PDF2Audio 
+
+This project provides a comprehensive solution for converting various text inputs, including PDFs, URLs, and markdown content, into audio formats such as podcasts, lectures, and summaries. It leverages OpenAI's GPT models for advanced text generation and text-to-speech conversion, offering a seamless experience for creating engaging audio content. Users can iteratively refine the output by editing transcripts and providing feedback, ensuring the final product meets their needs.
 
 ![image](https://github.com/user-attachments/assets/ef8a5e84-d532-4e0e-b08b-fb7be2f98469)
 
 ## Features
 
-- Upload multiple PDF files
-- Choose from different instruction templates (podcast, lecture, summary, etc.)
-- Customize text generation and audio models
-- Select different voices for speakers
-- Iterate on the draft via specific or general commments, and/or edits to the transcript and specific feedback to the model for improvements
+- **Upload multiple PDF files**: Easily upload and process multiple PDF documents.
+- **Web Content Processing**: Fetch and process text from URLs and markdown content using `requests`, `BeautifulSoup`, and `markdown2`.
+- **Choose from different instruction templates**: Generate content in various formats such as podcasts, lectures, and summaries, with support for multiple languages.
+- **Customize text generation and audio models**: Select from a range of models for text and audio generation.
+- **Select different voices for speakers**: Choose from multiple voice options for a personalized audio experience.
+- **Audio Conversion**: Convert audio formats using `pydub` for flexible output options.
+- **Iterative Improvements**: Edit transcripts and provide feedback to refine and improve the generated content.
 
 ## Use in Colab
 
@@ -66,7 +70,7 @@ To run the PDF2Audio app:
 
 2. Run the Python script that launches the Gradio interface:
    ```
-   python app.py
+   python appv6.py
    ```
 
 3. Open your web browser and go to the URL provided in the terminal (typically `http://127.0.0.1:7860`).
@@ -75,15 +79,15 @@ To run the PDF2Audio app:
 
 ## How to Use
 
-1. Upload one or more PDF files
-2. Select the desired instruction template
-3. Customize the instructions if needed
-4. Click "Generate Audio" to create your audio content
+1. **Upload Input**: Upload one or more PDF files, or provide a URL or markdown content.
+2. **Select Template**: Choose the desired instruction template for the type of content you want to generate.
+3. **Customize Instructions**: Modify the instructions if needed to tailor the output to your preferences.
+4. **Generate Audio**: Click "Generate Audio" to create your audio content.
+5. **Iterate and Improve**: Edit the transcript and provide feedback to refine the audio output.
 
 ## Access via 🤗 Hugging Face Spaces
 
 [lamm-mit/PDF2Audio](https://huggingface.co/spaces/lamm-mit/PDF2Audio)
-
 
 ## Example result
 
@@ -117,5 +121,3 @@ This project was inspired by and based on the code available at [https://github.
     year={2024},
     url={http://iopscience.iop.org/article/10.1088/2632-2153/ad7228},
 }
-```
-

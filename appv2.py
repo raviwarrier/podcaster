@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 import concurrent.futures as cf
 import glob
 import io
@@ -19,18 +18,21 @@ from pypdf import PdfReader
 from tenacity import retry, retry_if_exception_type
 
 import re
+import requests
+from bs4 import BeautifulSoup
+import markdown2
 
 def read_readme():
     readme_path = Path("README.md")
     if readme_path.exists():
-        with open(readme_path, "r") as file:
+        with open(readme_path, "r", encoding="utf-8") as file:
             content = file.read()
             # Use regex to remove metadata enclosed in -- ... --
             content = re.sub(r'--.*?--', '', content, flags=re.DOTALL)
             return content
     else:
         return "README.md not found. Please check the repository for more information."
-        
+
 # Define multiple sets of instruction templates
 INSTRUCTION_TEMPLATES = {
 ################# PODCAST ##################
@@ -40,11 +42,15 @@ INSTRUCTION_TEMPLATES = {
 Don't worry about the formatting issues or any irrelevant information; your goal is to extract the key points, identify definitions, and interesting facts that could be discussed in a podcast. 
 
 Define all terms used carefully for a broad audience of listeners.
+
+The podcast is called "Impress Every Investor by the Funding Pitchcraft Team". Do not use any other name for the podcast.
 """,
         "text_instructions": "First, carefully read through the input text and identify the main topics, key points, and any interesting facts or anecdotes. Think about how you could present this information in a fun, engaging way that would be suitable for a high quality presentation.",
         "scratch_pad": """Brainstorm creative ways to discuss the main topics and key points you identified in the input text. Consider using analogies, examples, storytelling techniques, or hypothetical scenarios to make the content more relatable and engaging for listeners.
 
 Keep in mind that your podcast should be accessible to a general audience, so avoid using too much jargon or assuming prior knowledge of the topic. If necessary, think of ways to briefly explain any complex concepts in simple terms.
+
+If the input is a URL or the input contains the term "Impress Every Investor", refer to it as a comprehensive toolkit for startup founders aimed improving their investor pitches and developed by Ravi Warrier and the team at Funding Pitchcraft. 
 
 Use your imagination to fill in any gaps in the input text or to come up with thought-provoking questions that could be explored in the podcast. The goal is to create an informative and entertaining dialogue, so feel free to be creative in your approach.
 
@@ -59,6 +65,8 @@ Make sure to make it fun and exciting.
         "dialog": """Write a very long, engaging, informative podcast dialogue here, based on the key points and creative ideas you came up with during the brainstorming session. Use a conversational tone and include any necessary context or explanations to make the content accessible to a general audience. 
 
 Write it as a conversation between two enthusiastic people, none of whom are the authors of the text provided. The speakers are excited to talk about the article and share their learning and understanding with the listener. Direct the statements or occasional questions to the listener.
+
+The speakers are long-time colleagues with an amazing, warm, friendly and candid rapport with often finishing each others sentences, mildly joking or laughing at each others jokes, and even speaking over each other in enthusiasm.
 
 Never use made-up names for the hosts and guests, but make it an engaging and immersive experience for listeners. Do not include any bracketed placeholders like [Host] or [Guest]. Design your output to be read aloud -- it will be directly converted into audio.
 
@@ -431,7 +439,6 @@ O podcast deve ter cerca de 20.000 palavras.
     },
 }
 
-# Function to update instruction fields based on template selection
 def update_instructions(template):
     return (
         INSTRUCTION_TEMPLATES[template]["intro"],
@@ -439,25 +446,7 @@ def update_instructions(template):
         INSTRUCTION_TEMPLATES[template]["scratch_pad"],
         INSTRUCTION_TEMPLATES[template]["prelude"],
         INSTRUCTION_TEMPLATES[template]["dialog"]
-           )
-
-import concurrent.futures as cf
-import glob
-import io
-import os
-import time
-from pathlib import Path
-from tempfile import NamedTemporaryFile
-from typing import List, Literal
-
-import gradio as gr
-
-from loguru import logger
-from openai import OpenAI
-from promptic import llm
-from pydantic import BaseModel, ValidationError
-from pypdf import PdfReader
-from tenacity import retry, retry_if_exception_type
+    )
 
 # Define standard values
 STANDARD_TEXT_MODELS = [
@@ -494,6 +483,37 @@ class Dialogue(BaseModel):
     scratchpad: str
     dialogue: List[DialogueItem]
 
+def extract_text_from_pdf(file_path):
+    reader = PdfReader(file_path)
+    text = "\n\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+    return text
+
+def handle_text_input(text):
+    return text
+
+def convert_markdown_to_text(markdown_content):
+    html = markdown2.markdown(markdown_content)
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text()
+    return text
+
+def fetch_text_from_url(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, "html.parser")
+        # Remove scripts and styles
+        for script in soup(["script", "style"]):
+            script.decompose()
+        text = soup.get_text(separator="\n")
+        # Clean up the text
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = "\n".join(chunk for chunk in chunks if chunk)
+        return text
+    except Exception as e:
+        raise ValueError(f"Error fetching URL content: {e}")
+
 def get_mp3(text: str, voice: str, audio_model: str, api_key: str = None) -> bytes:
     client = OpenAI(
         api_key=api_key or os.getenv("OPENAI_API_KEY"),
@@ -508,7 +528,6 @@ def get_mp3(text: str, voice: str, audio_model: str, api_key: str = None) -> byt
             for chunk in response.iter_bytes():
                 file.write(chunk)
             return file.getvalue()
-
 
 from functools import wraps
 
@@ -526,7 +545,11 @@ def conditional_llm(model, api_base=None, api_key=None):
     return decorator
 
 def generate_audio(
-    files: list,
+    input_type: str,
+    pdf_files: list = None,
+    text_input: str = None,
+    markdown_input: str = None,
+    url_input: str = None,
     openai_api_key: str = None,
     text_model: str = "o1-preview-2024-09-12",
     audio_model: str = "tts-1",
@@ -549,13 +572,29 @@ def generate_audio(
 
     combined_text = original_text or ""
 
-    # If there's no original text, extract it from the uploaded files
-    if not combined_text:
-        for file in files:
-            with Path(file).open("rb") as f:
-                reader = PdfReader(f)
-                text = "\n\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                combined_text += text + "\n\n"
+    # Process based on input type
+    if input_type == "PDF":
+        if not pdf_files:
+            raise gr.Error("No PDF files uploaded.")
+        for file in pdf_files:
+            text = extract_text_from_pdf(file.name)
+            combined_text += text + "\n\n"
+    elif input_type == "Text":
+        if not text_input:
+            raise gr.Error("No text input provided.")
+        combined_text += handle_text_input(text_input) + "\n\n"
+    elif input_type == "Markdown":
+        if not markdown_input:
+            raise gr.Error("No Markdown input provided.")
+        text = convert_markdown_to_text(markdown_input)
+        combined_text += text + "\n\n"
+    elif input_type == "URL":
+        if not url_input:
+            raise gr.Error("No URL input provided.")
+        text = fetch_text_from_url(url_input)
+        combined_text += text + "\n\n"
+    else:
+        raise gr.Error("Unsupported input type selected.")
 
     # Configure the LLM based on selected model and api_base
     @retry(retry=retry_if_exception_type(ValidationError))
@@ -586,13 +625,13 @@ def generate_audio(
         {edited_transcript}{user_feedback}
         """
 
-    instruction_improve='Based on the original text, please generate an improved version of the dialogue by incorporating the edits, comments and feedback.'
-    edited_transcript_processed="\nPreviously generated edited transcript, with specific edits and comments that I want you to carefully address:\n"+"<edited_transcript>\n"+edited_transcript+"</edited_transcript>" if edited_transcript !="" else ""
-    user_feedback_processed="\nOverall user feedback:\n\n"+user_feedback if user_feedback !="" else ""
+    instruction_improve='Based on the original text, please generate an improved version of the dialogue by incorporating the edits, comments, and feedback.'
+    edited_transcript_processed="\nPreviously generated edited transcript, with specific edits and comments that I want you to carefully address:\n"+"<edited_transcript>\n"+edited_transcript+"</edited_transcript>" if edited_transcript else ""
+    user_feedback_processed="\nOverall user feedback:\n\n"+user_feedback if user_feedback else ""
 
-    if edited_transcript_processed.strip()!='' or user_feedback_processed.strip()!='':
+    if edited_transcript_processed.strip() or user_feedback_processed.strip():
         user_feedback_processed="<requested_improvements>"+user_feedback_processed+"\n\n"+instruction_improve+"</requested_improvements>" 
-    
+
     if debug:
         logger.info (edited_transcript_processed)
         logger.info (user_feedback_processed)
@@ -650,9 +689,15 @@ def generate_audio(
     return temporary_file.name, transcript, combined_text
 
 def validate_and_generate_audio(*args):
-    files = args[0]
-    if not files:
+    input_type = args[0]
+    if input_type == "PDF" and not args[1]:
         return None, None, None, "Please upload at least one PDF file before generating audio."
+    elif input_type == "Text" and not args[2]:
+        return None, None, None, "Please enter text before generating audio."
+    elif input_type == "Markdown" and not args[3]:
+        return None, None, None, "Please enter Markdown content before generating audio."
+    elif input_type == "URL" and not args[4]:
+        return None, None, None, "Please enter a URL before generating audio."
     try:
         audio_file, transcript, original_text = generate_audio(*args)
         return audio_file, transcript, original_text, None  # Return None as the error when successful
@@ -661,15 +706,9 @@ def validate_and_generate_audio(*args):
         return None, None, None, str(e)
 
 def edit_and_regenerate(edited_transcript, user_feedback, *args):
-    # Replace the original transcript and feedback in the args with the new ones
-    #new_args = list(args)
-    #new_args[-2] = edited_transcript  # Update edited transcript
-    #new_args[-1] = user_feedback  # Update user feedback
-    return validate_and_generate_audio(*new_args)
+    return validate_and_generate_audio(*args)
 
-# New function to handle user feedback and regeneration
 def process_feedback_and_regenerate(feedback, *args):
-    # Add user feedback to the args
     new_args = list(args)
     new_args.append(feedback)  # Add user feedback as a new argument
     return validate_and_generate_audio(*new_args)
@@ -706,19 +745,28 @@ with gr.Blocks(title="PDF to Audio", css="""
     
     with gr.Row(elem_id="header"):
         with gr.Column(scale=4):
-            gr.Markdown("# Convert PDFs into an audio podcast, lecture, summary and others\n\nFirst, upload one or more PDFs, select options, then push Generate Audio.\n\nYou can also select a variety of custom option and direct the way the result is generated.", elem_id="title")
+            gr.Markdown("# Convert PDFs, Text, Markdown, or Webpages into Audio\n\nSelect your input type, provide the input, select options, and then click Generate Audio.\n\nYou can also customize the generation options for tailored results.", elem_id="title")
         with gr.Column(scale=1):
             gr.HTML('''
                 <div id="logo_container">
                     <img src="https://huggingface.co/spaces/lamm-mit/PDF2Audio/resolve/main/logo.png" id="logo_image" alt="Logo">
                 </div>
             ''')
-    #gr.Markdown("")    
+    
     submit_btn = gr.Button("Generate Audio", elem_id="submit_btn")
 
     with gr.Row(elem_id="main_container"):
         with gr.Column(scale=2):
-            files = gr.Files(label="PDFs", file_types=["pdf"], )
+            input_type = gr.Radio(
+                label="Input Type",
+                choices=["PDF", "Text", "Markdown", "URL"],
+                value="PDF",
+                info="Select the type of input you are providing."
+            )
+            pdf_files = gr.Files(label="Upload PDFs", file_types=["pdf"], visible=True)
+            text_input = gr.Textbox(label="Enter Text", lines=10, visible=False)
+            markdown_input = gr.Textbox(label="Enter Markdown", lines=10, visible=False)
+            url_input = gr.Textbox(label="Enter Webpage URL", lines=1, placeholder="https://example.com", visible=False)
             
             openai_api_key = gr.Textbox(
                 label="OpenAI API Key",
@@ -729,7 +777,7 @@ with gr.Blocks(title="PDF to Audio", css="""
             text_model = gr.Dropdown(
                 label="Text Generation Model",
                 choices=STANDARD_TEXT_MODELS,
-                value="o1-preview-2024-09-12", #"gpt-4o-mini",
+                value="o1-preview-2024-09-12",
                 info="Select the model to generate the dialogue text.",
             )
             audio_model = gr.Dropdown(
@@ -756,7 +804,6 @@ with gr.Blocks(title="PDF to Audio", css="""
                 info="If you are using a custom or local model, provide the API base URL here, e.g.: http://localhost:8080/v1 for llama.cpp REST server.",
             )
 
-        with gr.Column(scale=3):
             template_dropdown = gr.Dropdown(
                 label="Instruction Template",
                 choices=list(INSTRUCTION_TEMPLATES.keys()),
@@ -795,6 +842,23 @@ with gr.Blocks(title="PDF to Audio", css="""
                 info="Provide the instructions for generating the presentation or podcast dialogue.",
             )
 
+            def update_input_components(selected_type):
+                return {
+                    pdf_files: gr.update(visible=(selected_type == "PDF")),
+                    text_input: gr.update(visible=(selected_type == "Text")),
+                    markdown_input: gr.update(visible=(selected_type == "Markdown")),
+                    url_input: gr.update(visible=(selected_type == "URL")),
+                }
+
+            input_type.change(
+                fn=update_input_components,
+                inputs=[input_type],
+                outputs=[pdf_files, text_input, markdown_input, url_input]
+            )
+    
+        with gr.Column(scale=3):
+            pass  # Retain the rest of the interface as is
+    
     audio_output = gr.Audio(label="Audio", format="mp3", interactive=False, autoplay=False)
     transcript_output = gr.Textbox(label="Transcript", lines=20, show_copy_button=True)
     original_text_output = gr.Textbox(label="Original Text", lines=10, visible=False)
@@ -804,9 +868,9 @@ with gr.Blocks(title="PDF to Audio", css="""
     edited_transcript = gr.Textbox(label="Edit Transcript Here. E.g., mark edits in the text with clear instructions. E.g., '[ADD DEFINITION OF MATERIOMICS]'.", lines=20, visible=False,
                                    show_copy_button=True, interactive=False)
 
-    user_feedback = gr.Textbox(label="Provide Feedback or Notes", lines=10, #placeholder="Enter your feedback or notes here..."
-                              )
+    user_feedback = gr.Textbox(label="Provide Feedback or Notes", lines=10)
     regenerate_btn = gr.Button("Regenerate Audio with Edits and Feedback")
+
     # Function to update the interactive state of edited_transcript
     def update_edit_box(checkbox_value):
         return gr.update(interactive=checkbox_value, lines=20 if checkbox_value else 20, visible=True if checkbox_value else False)
@@ -827,7 +891,8 @@ with gr.Blocks(title="PDF to Audio", css="""
     submit_btn.click(
         fn=validate_and_generate_audio,
         inputs=[
-            files, openai_api_key, text_model, audio_model, 
+            input_type, pdf_files, text_input, markdown_input, url_input,
+            openai_api_key, text_model, audio_model, 
             speaker_1_voice, speaker_2_voice, api_base,
             intro_instructions, text_instructions, scratch_pad_instructions, 
             prelude_dialog, podcast_dialog_instructions, 
@@ -850,13 +915,15 @@ with gr.Blocks(title="PDF to Audio", css="""
 
     regenerate_btn.click(
         fn=lambda use_edit, edit, *args: validate_and_generate_audio(
-            *args[:12],  # All inputs up to podcast_dialog_instructions
+            *args[:5],  # input_type, pdf_files, text_input, markdown_input, url_input
+            *args[5:],
             edit if use_edit else "",  # Use edited transcript if checkbox is checked, otherwise empty string
             *args[12:]  # user_feedback and original_text_output
         ),
         inputs=[
             use_edited_transcript, edited_transcript,
-            files, openai_api_key, text_model, audio_model, 
+            input_type, pdf_files, text_input, markdown_input, url_input,
+            openai_api_key, text_model, audio_model, 
             speaker_1_voice, speaker_2_voice, api_base,
             intro_instructions, text_instructions, scratch_pad_instructions, 
             prelude_dialog, podcast_dialog_instructions,
@@ -879,7 +946,7 @@ with gr.Blocks(title="PDF to Audio", css="""
     # Add README content at the bottom
     gr.Markdown("---")  # Horizontal line to separate the interface from README
     gr.Markdown(read_readme())
-    
+
 # Enable queueing for better performance
 demo.queue(max_size=20, default_concurrency_limit=32)
 

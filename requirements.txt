@@ -1,7 +1,16 @@
+# Release Notes
+# Version 1.1.0
+# - Added dependencies for the project based on imports in appv6.py and api.py
+
 gradio
-pandas
-openai
-pypdf
 loguru
+openai
 promptic
+pydantic
+pypdf
 tenacity
+requests
+beautifulsoup4
+markdown2
+pydub
+flask

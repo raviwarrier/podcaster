@@ -121,3 +121,6 @@ This project was inspired by and based on the code available at [https://github.
     year={2024},
     url={http://iopscience.iop.org/article/10.1088/2632-2153/ad7228},
 }
+
+# podcaster
+This is an extension of PDF2Audio by LAMM-MIT to provide more flexibility while creating audio
